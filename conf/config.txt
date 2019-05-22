@@ -1,0 +1,165 @@
+package conf
+
+import (
+	"fmt"
+	"sync"
+
+	logger "go.uber.org/zap"
+
+	"github.com/Unknwon/goconfig"
+)
+
+var (
+	once sync.Once
+	m    *svnConfigManager
+	err  error
+)
+
+// GetSvnConfigManagerInstance 获取svnconfigmanager实例
+func GetSvnConfigManagerInstance() *svnConfigManager {
+	once.Do(func() {
+		if m == nil {
+			m = &svnConfigManager{
+				lock:   new(sync.RWMutex),
+				config: map[string]*goconfig.ConfigFile{},
+			}
+		}
+	})
+	return m
+}
+
+type svnConfigManager struct {
+	lock   *sync.RWMutex
+	config map[string]*goconfig.ConfigFile
+}
+
+func (s *svnConfigManager) ModifyConfigFile(file, section string, value map[string]string) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	cfg, ok := s.config[file]
+	if !ok {
+		logger.Infof("load config '%v' file from disk", file)
+		cfg, err = goconfig.LoadConfigFile(file)
+		if err != nil {
+			return fmt.Errorf("LoadConfig failed: %v", err.Error())
+		}
+		s.config[file] = cfg
+	}
+
+	for k, v := range value {
+		cfg.SetValue(section, k, v)
+	}
+	//保存配置文件
+	err = goconfig.SaveConfigFile(cfg, file)
+	if err != nil {
+		return fmt.Errorf("SaveConfigFile failed: %v", err.Error())
+	}
+	return nil
+}
+
+func (s *svnConfigManager) DeleteKey(file, section, key string) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	cfg, ok := s.config[file]
+	if !ok {
+		logger.Infof("load config '%v' file from disk", file)
+		cfg, err = goconfig.LoadConfigFile(file)
+		if err != nil {
+			return fmt.Errorf("LoadConfig failed: %v", err.Error())
+		}
+		s.config[file] = cfg
+	}
+	cfg.DeleteKey(section, key)
+	//保存配置文件
+	err = goconfig.SaveConfigFile(cfg, file)
+	if err != nil {
+		return fmt.Errorf("SaveConfigFile failed: %v", err.Error())
+	}
+	return nil
+}
+
+func (s *svnConfigManager) ReadConfigFile(file, section, key string) (error, string) {
+	s.lock.Lock()
+
+	cfg, ok := s.config[file]
+	if !ok {
+		logger.Infof("load config '%v' file from disk", file)
+		cfg, err = goconfig.LoadConfigFile(file)
+		if err != nil {
+			return fmt.Errorf("LoadConfig failed: %v", err.Error()), ""
+		}
+		s.config[file] = cfg
+	}
+	s.lock.Unlock()
+
+	r, err := cfg.GetValue(section, key)
+	if err != nil {
+		return fmt.Errorf("ReadConfigFile failed: %v", err.Error()), ""
+	}
+	return nil, r
+}
+
+func (s *svnConfigManager) ReadConfigFileSection(file, section string) (error, map[string]string) {
+	s.lock.Lock()
+	cfg, ok := s.config[file]
+	if !ok {
+		logger.Infof("load config '%v' file from disk", file)
+		cfg, err = goconfig.LoadConfigFile(file)
+		if err != nil {
+			return fmt.Errorf("LoadConfig failed: %v", err.Error()), nil
+		}
+		s.config[file] = cfg
+	}
+	s.lock.Unlock()
+
+	// cfg, err := goconfig.LoadConfigFile(file)
+	// if err != nil {
+	// 	return fmt.Errorf("LoadConfig failed: %v", err.Error()), nil
+	// }
+	r, err := cfg.GetSection(section)
+	if err != nil {
+		return fmt.Errorf("ReadConfigFile failed: %v", err.Error()), nil
+	}
+	return nil, r
+}
+
+func (s *svnConfigManager) ReadSectionList(file string) (error, []string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	cfg, ok := s.config[file]
+	if !ok {
+		logger.Infof("load config '%v' file from disk", file)
+		cfg, err = goconfig.LoadConfigFile(file)
+		if err != nil {
+			return fmt.Errorf("LoadConfig failed: %v", err.Error()), nil
+		}
+		s.config[file] = cfg
+	}
+
+	return nil, cfg.GetSectionList()
+}
+
+func (s *svnConfigManager) DeleteSection(file, section string) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	cfg, ok := s.config[file]
+	if !ok {
+		logger.Infof("load config '%v' file from disk", file)
+		cfg, err = goconfig.LoadConfigFile(file)
+		if err != nil {
+			return fmt.Errorf("LoadConfig failed: %v", err.Error())
+		}
+		s.config[file] = cfg
+	}
+
+	cfg.DeleteSection(section)
+
+	//保存配置文件
+	err = goconfig.SaveConfigFile(cfg, file)
+	if err != nil {
+		return fmt.Errorf("SaveConfigFile failed: %v", err.Error())
+	}
+	return nil
+}
